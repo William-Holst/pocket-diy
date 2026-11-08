@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pocket DIY</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; background: #fff; }
+  h1 { font-size: 1.6em; } h2 { font-size: 1.15em; margin-top: 2em; }
+</style>
+</head>
+<body>
+<h1>Pocket DIY</h1>
+<p>Pocket DIY is a personal Google Apps Script project by William Holst. It turns voice recordings saved in his own Google Drive into transcripts and meeting notes, using Gemini on his own Google Cloud project.</p>
+<p>It is a private tool for one user. It is not offered to the public.</p>
+
+<h2 id="privacy">Privacy policy</h2>
+<p>Pocket DIY only runs in the Google account of the person who installed it. It reads audio files from that person's Google Drive folder "Pocket/Inbox", reads that person's Google Calendar to find the matching event, sends the audio and text to Gemini through that person's own Google Cloud project (EU region), and writes the notes as a Google Doc in that person's Drive.</p>
+<ul>
+  <li>No data is sent to the developer or to any third party other than Google.</li>
+  <li>Audio is copied to a Cloud Storage bucket in the EU only while it is processed, and is deleted after at most one day.</li>
+  <li>Nothing is sold, shared or used for advertising.</li>
+  <li>You can stop it at any time by deleting the script's trigger or removing its access at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
+</ul>
+
+<h2>Contact</h2>
+<p>wmunchholst@gmail.com</p>
+</body>
+</html>
