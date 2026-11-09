@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pocket">
+<meta name="theme-color" content="#0b0b0c">
+<meta name="robots" content="noindex">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<title>Pocket</title>
+<!-- No web manifest on purpose: a manifest start_url would drop the #k= fragment on iOS. -->
+<style>
+  :root { color-scheme: dark; --bg: #0b0b0c; --fg: #f2f2f2; --mut: #8e8e93; --line: #232326; --red: #ff3b30; --green: #34c759; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); overscroll-behavior: none;
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+  body { min-height: 100vh; min-height: 100dvh; display: flex;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  main { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 520px; margin: 0 auto; padding: 16px 20px; }
+  .stage { flex: 1; min-height: 360px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; }
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; touch-action: manipulation; }
+  button:disabled { opacity: .45; cursor: default; }
+  .rec { width: min(62vw, 240px); aspect-ratio: 1; border-radius: 50%; background: var(--red);
+    font-size: 30px; font-weight: 700; box-shadow: 0 0 0 12px rgba(255, 59, 48, .18); }
+  .rec:active:not(:disabled), .stop:active:not(:disabled) { transform: scale(.97); }
+  .clock { display: flex; align-items: center; gap: 14px; font-size: 64px; font-weight: 300; font-variant-numeric: tabular-nums; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; background: var(--red); animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .2; transform: scale(.8); } }
+  .meter { width: 72%; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--green); transform-origin: left; transform: scaleX(0); }
+  .stop { width: min(62vw, 240px); aspect-ratio: 1; border-radius: 28px; background: var(--fg); color: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    font-size: 34px; font-weight: 800; letter-spacing: .08em; }
+  .sq { width: 56px; height: 56px; border-radius: 8px; background: var(--red); }
+  #note { min-height: 1.4em; margin: 6px 0; color: #ffcc00; font-size: 14px; text-align: center; }
+  .status { min-height: 3.2em; text-align: center; }
+  #status { margin: 0 0 10px; }
+  #retry, #keyform button, li button { background: #2c2c2e; padding: 12px 22px; border-radius: 12px; font-weight: 600; }
+  .ok { color: var(--green); } .bad { color: #ff6b60; } .mut { color: var(--mut); } .live { color: var(--red); }
+  #keyform { margin: 4px 0 12px; text-align: center; }
+  #keyform p { margin: 0 0 8px; }
+  .row { display: flex; gap: 8px; }
+  input { flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--fg); background: #1c1c1e; border: 1px solid #3a3a3c;
+    border-radius: 12px; padding: 12px; -webkit-user-select: text; user-select: text; }
+  ul { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--line); }
+  li { display: flex; align-items: center; gap: 12px; padding: 9px 2px; border-bottom: 1px solid var(--line); font-size: 15px; }
+  li span:first-child { flex: 1; }
+  li button { padding: 6px 12px; font-size: 14px; }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <section id="idle" class="stage">
+    <button id="rec" class="rec" type="button">Optag</button>
+  </section>
+  <section id="live" class="stage" hidden>
+    <div class="clock"><span class="dot"></span><span id="time">00:00</span></div>
+    <div class="meter"><i id="bar"></i></div>
+    <button id="stop" class="stop" type="button"><span class="sq"></span>STOP</button>
+  </section>
+  <p id="note"></p>
+  <div class="status">
+    <p id="status" role="status" aria-live="polite"></p>
+    <button id="retry" type="button" hidden>Prøv igen</button>
+  </div>
+  <form id="keyform" hidden>
+    <p>Åbn linket med nøglen. Eller indsæt nøglen her:</p>
+    <div class="row">
+      <input id="keyin" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Nøgle" aria-label="Nøgle">
+      <button type="submit">Gem</button>
+    </div>
+  </form>
+  <ul id="list" aria-label="Seneste optagelser"></ul>
+</main>
+<script>
+'use strict';
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbwjjt8BDUnvfed1lCxKvonhixl5mYl6_RuJh3IwqmRKYuHkuj1hAKhy3mQ93VqKTGdX/exec';
+const MAX_BYTES = 35 * 1024 * 1024; // per piece (raw); Apps Script takes ~50 MB after base64
+const MIN_MS = 3000;   // whole sessions shorter than this are accidental opens: deleted, never sent
+const PIECE_SEC = 600; // a session is cut into 10-min pieces; '#piece=30' in the URL overrides it for testing
+const pieceSec = Math.max(5, +(location.hash.match(/[#&]piece=(\d+)/) || [])[1] || PIECE_SEC);
+const $ = id => document.getElementById(id);
+const errText = e => (e && e.message) || String(e);
+
+// ---------- Key: arrives as #k=..., kept in localStorage. The fragment is left alone. ----------
+let key = '';
+function loadKey() {
+  const m = location.hash.match(/[#&]k=([^&]+)/);
+  let h = '';
+  if (m) { try { h = decodeURIComponent(m[1]).trim(); } catch (e) { h = m[1]; } }
+  try {
+    // A #k= only wins when it is new, so a key typed by hand isn't overwritten by an old home-screen link.
+    if (h && h !== localStorage.getItem('pocket_hashkey')) {
+      localStorage.setItem('pocket_hashkey', h);
+      localStorage.setItem('pocket_key', h);
+    }
+    key = localStorage.getItem('pocket_key') || h;
+  } catch (e) { key = h; }
+  $('keyform').hidden = !!key;
+}
+
+// ---------- IndexedDB: 'recs' = one row per piece, 'chunks' = audio keyed [pieceId, seq] ----------
+let db = null;
+function openDB() {
+  return new Promise((ok, no) => {
+    const r = indexedDB.open('pocket', 1);
+    r.onupgradeneeded = () => {
+      r.result.createObjectStore('recs', { keyPath: 'id' });
+      r.result.createObjectStore('chunks', { keyPath: ['id', 'seq'] });
+    };
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => no(r.error);
+  });
+}
+function tx1(names, mode, fn) {
+  return new Promise((ok, no) => {
+    const t = db.transaction(names, mode);
+    const req = fn(...[].concat(names).map(n => t.objectStore(n)));
+    t.oncomplete = () => ok(req && req.result);
+    t.onerror = t.onabort = () => no(t.error || new Error('IndexedDB'));
+  });
+}
+// iOS can drop the DB connection while the app sits in the background: reopen and try once more.
+async function tx(names, mode, fn) {
+  try { return await tx1(names, mode, fn); }
+  catch (e) { db = await openDB(); return tx1(names, mode, fn); }
+}
+const range = id => IDBKeyRange.bound([id, 0], [id, Infinity]);
+const allRecs = () => tx('recs', 'readonly', s => s.getAll());
+const putRec = r => tx('recs', 'readwrite', s => s.put(r));
+const delRec = id => tx(['recs', 'chunks'], 'readwrite', (rs, cs) => { cs.delete(range(id)); rs.delete(id); });
+const getParts = id => tx('chunks', 'readonly', s => s.getAll(range(id))).then(a => a.map(c => c.data));
+// Re-reads the row inside one transaction, so a stale copy never overwrites newer fields.
+const recover = (id, end) => tx('recs', 'readwrite', s => {
+  const g = s.get(id);
+  g.onsuccess = () => {
+    const r = g.result;
+    if (r && (r.state === 'rec' || (end && r.state === 'pending'))) { r.state = 'pending'; if (end) r.end = true; s.put(r); }
+  };
+});
+
+// ---------- Small helpers ----------
+const pad = (n, w) => String(n).padStart(w, '0');
+function fmt(ms) {
+  const s = Math.max(0, Math.floor((ms || 0) / 1000)), h = Math.floor(s / 3600);
+  return (h ? h + ':' : '') + pad(Math.floor(s / 60) % 60, 2) + ':' + pad(s % 60, 2);
+}
+// Times in names are Copenhagen time; the backend parses them in that zone.
+function stamp(ms) {
+  let p = {};
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Copenhagen', hourCycle: 'h23', year: 'numeric', month: '2-digit',
+      day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(ms)).forEach(x => { p[x.type] = x.value; });
+  } catch (e) {
+    const d = new Date(ms);
+    p = { year: d.getFullYear(), month: pad(d.getMonth() + 1, 2), day: pad(d.getDate(), 2), hour: pad(d.getHours(), 2), minute: pad(d.getMinutes(), 2), second: pad(d.getSeconds(), 2) };
+  }
+  return p.year + '-' + p.month + '-' + p.day + '_' + String(p.hour).replace(/^24$/, '00') + '-' + p.minute + '-' + p.second;
+}
+// rec_<sessionStart>_p<NNN>_o<SSSSSS>[_end].m4a (rows from before pieces keep their own name)
+const pieceName = r => !r.p ? r.name : 'rec_' + stamp(r.sessStart) + '_p' + pad(r.p, 3) + '_o' + pad(r.off, 6) +
+  (r.end ? '_end' : '') + (/mp4|aac/i.test(r.mime) ? '.m4a' : '.webm');
+// Rows grouped per session, pieces in order.
+function group(rows) {
+  const m = new Map();
+  for (const r of rows) { const k = r.sid || r.id; if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
+  return [...m.values()].map(ps => ps.sort((a, b) => (a.p || 0) - (b.p || 0)));
+}
+const when = ms => new Date(ms).toLocaleString('da-DK', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const mb = b => (b / 1048576).toFixed(1).replace('.', ',');
+const note = t => { $('note').textContent = t; };
+function setStatus(text, cls, retry) {
+  $('status').textContent = text;
+  $('status').className = cls || '';
+  $('retry').hidden = !retry;
+}
+// FileReader avoids building a huge argument list for btoa (stack overflow on long recordings).
+const toB64 = blob => new Promise((ok, no) => {
+  const fr = new FileReader();
+  fr.onload = () => { const s = String(fr.result); ok(s.slice(s.indexOf(';base64,') + 8)); };
+  fr.onerror = () => no(fr.error);
+  fr.readAsDataURL(blob);
+});
+
+// ---------- Recording: one mic stream per session, one MediaRecorder per piece ----------
+let state = 'idle'; // idle | starting | rec | stopping
+let sess = null, mr = null, stream = null, ac = null, wl = null, unlock = null, mimeType = '', finishCur = null;
+let raf = 0, rotT = 0, stopT = 0, startedAt = 0, stoppedAt = 0;
+let saving = Promise.resolve(); // every IndexedDB write of a session runs in this order
+const saveErr = err => setStatus('Kunne ikke gemme lyden lokalt: ' + errText(err), 'bad');
+const STOP_NOTES = {
+  hidden: 'Optagelsen stoppede, fordi appen blev skjult. Den er gemt og sendes.',
+  mic: 'Mikrofonen blev afbrudt, så optagelsen stoppede. Den er gemt og sendes.',
+  error: 'Optageren fejlede, så optagelsen stoppede. Det optagne er gemt og sendes.'
+};
+
+function show() {
+  const live = state === 'rec' || state === 'stopping';
+  $('idle').hidden = live;
+  $('live').hidden = !live;
+  $('rec').disabled = state !== 'idle' || !db;
+  $('rec').textContent = state === 'starting' ? 'Starter…' : 'Optag';
+  $('stop').disabled = state !== 'rec';
+}
+
+// auto = started by opening the home-screen app; if that fails, the Optag button is the fallback.
+async function startRec(auto) {
+  if (state !== 'idle' || !db || Date.now() - stoppedAt < 1500) return; // 1.5 s guard against a double tap on STOP
+  if (!window.MediaRecorder || !navigator.mediaDevices) return setStatus('Denne browser kan ikke optage lyd.', 'bad');
+  state = 'starting'; show(); setStatus(''); note('');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mimeType = ['audio/mp4', 'audio/webm'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+    const t = Date.now();
+    sess = { sid: 'r' + t, start: t, p: 0, end: 0 };
+    // Hold a Web Lock while the session lives, so another open tab never mistakes it for a crashed one.
+    if (navigator.locks) {
+      await new Promise(ok => navigator.locks.request('pocket-' + sess.sid, () => { ok(); return new Promise(r => { unlock = r; }); }).catch(ok));
+    }
+    state = 'rec';
+    nextPiece(t);
+    stream.getAudioTracks().forEach(tr => { tr.onended = () => stopRec('mic'); });
+  } catch (e) {
+    cleanup();
+    if (unlock) unlock();
+    unlock = sess = mr = null; state = 'idle'; show();
+    if (auto) return setStatus('Tryk Optag for at optage.');
+    return setStatus(e && e.name === 'NotAllowedError' ? 'Ingen adgang til mikrofonen. Tillad mikrofonen og prøv igen.'
+      : 'Kunne ikke starte: ' + errText(e), 'bad');
+  }
+  startedAt = Date.now();
+  show(); wake(); meter(); renderList();
+  if (document.hidden) stopRec('hidden');
+}
+
+// Starts the recorder for the next piece on the same stream. Its chunks go to IndexedDB every 5 s,
+// so a crash or a closed app loses at most a few seconds.
+function nextPiece(t) {
+  const opts = { audioBitsPerSecond: 32000 };
+  if (mimeType) opts.mimeType = mimeType;
+  let rec;
+  try { rec = new MediaRecorder(stream, opts); } catch (e) { rec = new MediaRecorder(stream); }
+  const s = sess, p = s.p + 1;
+  const pc = { id: s.sid + '_' + p, sid: s.sid, sessStart: s.start, p, off: Math.round((t - s.start) / 1000), start: t,
+    mime: rec.mimeType || mimeType || 'audio/webm', state: 'rec', end: false, dur: 0, bytes: 0, n: 0, seen: t };
+  let done = false;
+  rec.ondataavailable = e => {
+    if (done || !e.data || !e.data.size) return;
+    const now = Date.now(), seq = pc.n++, blob = e.data;
+    pc.bytes += blob.size; pc.dur = now - pc.start; pc.seen = now;
+    saving = saving.then(() => blob.arrayBuffer())
+      .then(data => tx(['recs', 'chunks'], 'readwrite', (rs, cs) => { cs.put({ id: pc.id, seq, data }); rs.put(pc); }))
+      .catch(saveErr);
+  };
+  // A piece ends by rotation (a new recorder takes over at once) or because the session stops (then it is the _end piece).
+  const finish = () => {
+    if (done) return;
+    done = true; clearTimeout(stopT);
+    let last = state !== 'rec';
+    if (!last) {
+      try { nextPiece(Date.now()); }
+      catch (e) { last = true; state = 'stopping'; s.end = Date.now(); note(STOP_NOTES.error); show(); }
+    }
+    pc.dur = ((last && s.end) || Date.now()) - pc.start;
+    pc.end = last; pc.state = 'pending';
+    saving = saving.then(() => putRec(pc)).catch(saveErr);
+    if (last) endSession(pc); else saving.then(pump); // finished pieces upload while recording goes on
+  };
+  rec.onstop = finish;
+  rec.onerror = () => stopRec('error');
+  rec.start(5000);
+  s.p = p; mr = rec; finishCur = finish;
+  saving = saving.then(() => putRec(pc)).catch(saveErr);
+  clearTimeout(rotT);
+  rotT = setTimeout(rotate, pieceSec * 1000);
+}
+
+function rotate() {
+  if (state !== 'rec') return;
+  const f = finishCur;
+  stopT = setTimeout(f, 10000); // in case 'stop' never fires
+  try { mr.stop(); } catch (e) { f(); }
+}
+
+// Only the STOP button ends a session on purpose. A hidden page, a lost mic or a recorder error also end it (saved and sent).
+function stopRec(why) {
+  if (state !== 'rec') return;
+  state = 'stopping'; sess.end = stoppedAt = Date.now(); show();
+  clearTimeout(rotT);
+  note(STOP_NOTES[why] || '');
+  setStatus('Sender…');
+  const f = finishCur;
+  stopT = setTimeout(f, 10000); // in case 'stop' never fires
+  try { if (mr.state !== 'inactive') mr.stop(); } catch (e) { f(); } // inactive = a rotation stop is already on its way
+}
+
+async function endSession(pc) {
+  const s = sess;
+  clearTimeout(rotT); cleanup();
+  await saving; // every piece is written before the lock is released
+  if ((s.end || Date.now()) - s.start < MIN_MS) note('Under 3 sekunder: slettet, ikke sendt.'); // pump deletes it
+  else if (pc.p === 1 && !pc.bytes) note('Ingen lyd blev optaget, så der er intet at sende.');
+  if (unlock) unlock();
+  unlock = sess = mr = finishCur = null;
+  state = 'idle'; stoppedAt = Date.now(); show(); pump();
+}
+
+function cleanup() {
+  cancelAnimationFrame(raf);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (ac) ac.close().catch(() => {});
+  if (wl) wl.release().catch(() => {});
+  stream = ac = wl = null;
+  $('bar').style.transform = 'scaleX(0)';
+}
+
+async function wake() {
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    if (state !== 'rec') return lock.release().catch(() => {});
+    wl = lock; note('');
+    // iOS can drop the lock on its own (e.g. low power): ask again while recording.
+    lock.addEventListener('release', () => { if (wl === lock) wl = null; if (state === 'rec' && !document.hidden) wake(); });
+  } catch (e) {
+    if (state === 'rec') note('Lås ikke telefonen, mens du optager.');
+  }
+}
+
+// Timer for the whole session + level meter. The analyser feeds a muted gain node so Safari keeps processing it.
+function meter() {
+  let an = null, buf = null;
+  try {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    an = ac.createAnalyser(); an.fftSize = 1024; buf = new Uint8Array(an.fftSize);
+    const mute = ac.createGain(); mute.gain.value = 0;
+    ac.createMediaStreamSource(stream).connect(an); an.connect(mute); mute.connect(ac.destination);
+    ac.resume().catch(() => {});
+  } catch (e) { an = null; }
+  const tick = () => {
+    if (!sess) return;
+    $('time').textContent = fmt((sess.end || Date.now()) - sess.start);
+    if (an) {
+      an.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += (buf[i] - 128) * (buf[i] - 128);
+      $('bar').style.transform = 'scaleX(' + Math.min(1, Math.sqrt(sum / buf.length) / 25).toFixed(3) + ')';
+    }
+    raf = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+// ---------- Upload queue: oldest first, retry with backoff, chunks deleted only after "OK" ----------
+let busy = false, again = false, tries = 0, retryT = 0, ctl = null, upAt = 0, hidAt = 0, upId = '';
+
+async function upload(r) {
+  const parts = await getParts(r.id);
+  if (!parts.length) { await delRec(r.id); return false; } // nothing was saved
+  const blob = new Blob(parts, { type: r.mime });
+  if (blob.size > MAX_BYTES) throw new Error('big');
+  const audio = await toB64(blob);
+  // JSON built as a Blob, so the big base64 string isn't copied again. text/plain = simple CORS request, no preflight.
+  const body = new Blob(['{"key":', JSON.stringify(key), ',"name":', JSON.stringify(pieceName(r)), ',"audio":"', audio, '"}'], { type: 'text/plain' });
+  ctl = new AbortController(); upAt = Date.now(); upId = r.id; renderList();
+  const t = setTimeout(() => ctl && ctl.abort(), 90000 + audio.length / 40);
+  try {
+    const res = await fetch(ENDPOINT, { method: 'POST', body, signal: ctl.signal });
+    const text = (await res.text()).trim();
+    if (!text.startsWith('OK')) throw new Error(text.slice(0, 80) || 'HTTP ' + res.status);
+  } finally { clearTimeout(t); ctl = null; upId = ''; }
+  r.state = 'sent'; r.sentAt = Date.now(); delete r.err;
+  await tx(['recs', 'chunks'], 'readwrite', (rs, cs) => { cs.delete(range(r.id)); rs.put(r); });
+  return true;
+}
+
+async function pump() {
+  if (!db) return;
+  if (busy) { again = true; return; }
+  busy = true; again = false; clearTimeout(retryT);
+  let failed = false, sent = 0, sentEnd = false, lastP = 0, msg = null;
+  try {
+    // A session that isn't live in any tab was cut off (crash, closed app): its 'rec' pieces are done,
+    // and its last piece becomes _end if none is.
+    const held = navigator.locks ? await navigator.locks.query().then(q => new Set(q.held.map(l => l.name)), () => null) : null;
+    for (const ps of group(await allRecs())) {
+      const last = ps[ps.length - 1], sid = last.sid || last.id;
+      const live = (sess && sess.sid === sid) || (held ? held.has('pocket-' + sid)
+        : last.state === 'rec' && Date.now() - (last.seen || last.start) < 20000);
+      if (live) continue;
+      const needEnd = !ps.some(r => r.end);
+      for (const r of ps) if (r.state === 'rec' || (r === last && needEnd && r.state === 'pending')) await recover(r.id, r === last);
+    }
+    // Sessions under 3 s in total are dropped. An empty last piece can't be sent: the piece before it carries _end if still unsent.
+    let all = await allRecs();
+    for (const r of all) {
+      const short = (r.p || 1) === 1 && !(r.dur >= MIN_MS);
+      if (r.state !== 'pending' || !r.end || (r.bytes && !short)) continue;
+      r.state = 'gone'; await delRec(r.id);
+      const prev = r.p > 1 && all.find(x => x.sid === r.sid && x.p === r.p - 1 && x.state === 'pending');
+      if (prev) { prev.end = true; await putRec(prev); }
+    }
+    all = all.filter(r => r.state === 'pending')
+      .sort((a, b) => (a.sessStart || a.start) - (b.sessStart || b.start) || (a.p || 0) - (b.p || 0));
+    for (const r of all) {
+      if (!key) { msg = ['Gemt. Sendes, når nøglen er indtastet.', 'bad']; $('keyform').hidden = false; break; }
+      setStatus(r.p && !(r.p === 1 && r.end) ? 'Sender del ' + r.p + '…' : 'Sender…');
+      try {
+        if (await upload(r)) { sent++; sentEnd = sentEnd || !!r.end; lastP = r.p; }
+        tries = 0;
+      } catch (e) {
+        if (e.message === 'big') {
+          r.state = 'big'; await putRec(r);
+          msg = ['For stor til at sende (' + mb(r.bytes) + ' MB). Tryk "Gem" i listen for at gemme lyden.', 'bad'];
+          continue;
+        }
+        failed = true;
+        r.err = e.name === 'AbortError' ? 'Timeout' : errText(e);
+        await putRec(r).catch(() => {});
+        if (r.err === 'Forbidden') { $('keyform').hidden = false; msg = ['Nøglen blev afvist. Åbn linket med nøglen igen.', 'bad']; }
+        break;
+      }
+      renderList();
+    }
+  } catch (e) { failed = true; }
+  busy = false;
+  if (failed) retryT = setTimeout(pump, Math.min(300000, 3000 * 2 ** tries++));
+  if (msg) setStatus(msg[0], msg[1], failed);
+  else if (failed) setStatus('Ikke sendt endnu, prøver igen', 'bad', true);
+  else if (sent) setStatus(sentEnd ? 'Sendt ✓ — noten kommer i Drive om ~3 min' : 'Del ' + lastP + ' sendt ✓', 'ok');
+  else if (state === 'idle' && $('status').textContent.startsWith('Sender')) setStatus('');
+  renderList();
+  if (again && !failed) pump();
+}
+
+// ---------- List: the latest 5 sessions ----------
+const span = (t, c) => Object.assign(document.createElement('span'), { textContent: t, className: c || '' });
+const t0 = ps => ps[0].sessStart || ps[0].start;
+let listSeq = 0;
+async function renderList() {
+  if (!db) return;
+  const seq = ++listSeq, rows = await allRecs().catch(() => []);
+  if (seq !== listSeq) return; // a newer render is on its way
+  const sessions = group(rows).sort((a, b) => t0(b) - t0(a));
+  sessions.filter(ps => ps.every(r => r.state === 'sent')).slice(20)
+    .forEach(ps => ps.forEach(r => delRec(r.id).catch(() => {}))); // keep history small
+  const ul = $('list');
+  ul.textContent = '';
+  for (const ps of sessions.slice(0, 5)) {
+    const n = ps.length, sent = ps.filter(r => r.state === 'sent').length, up = ps.find(r => r.id === upId);
+    const live = sess && sess.sid === ps[0].sid;
+    const big = ps.find(r => r.state === 'big'), err = ps.find(r => r.state === 'pending' && r.err);
+    const [txt, cls] = live ? ['Optager', 'live'] : big ? ['Fejl: for stor', 'bad'] : err ? ['Fejl', 'bad']
+      : sent === n ? ['Sendt ✓', 'ok'] : up ? [n > 1 ? 'Sender ' + up.p + '/' + n : 'Sender…', 'mut']
+      : [n > 1 ? 'Venter (' + sent + '/' + n + ' sendt)' : 'Venter', 'mut'];
+    const li = document.createElement('li');
+    li.append(span(when(t0(ps))), span(live ? '' : fmt(Math.max(...ps.map(r => (r.off || 0) * 1000 + (r.dur || 0)))), 'mut'), span(txt, cls));
+    if (err) li.title = err.err;
+    if (big) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = 'Gem'; b.onclick = () => saveLocal(big);
+      li.append(b);
+    }
+    ul.append(li);
+  }
+}
+
+// Too big to upload: hand the file to the share sheet (or download it) so it isn't lost.
+async function saveLocal(r) {
+  const file = new File(await getParts(r.id), pieceName(r), { type: r.mime });
+  const download = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  };
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file] }).catch(e => { if (e.name !== 'AbortError') download(); }); // refused, not cancelled
+  } else download();
+}
+
+// ---------- Wiring ----------
+$('rec').addEventListener('click', () => startRec(false));
+$('stop').addEventListener('click', () => { if (Date.now() - startedAt > 1500) stopRec('user'); }); // ignore a double tap on Optag
+$('retry').addEventListener('click', () => { tries = 0; pump(); });
+$('keyform').addEventListener('submit', e => {
+  e.preventDefault();
+  const k = $('keyin').value.trim();
+  if (!k) return;
+  key = k;
+  try { localStorage.setItem('pocket_key', k); } catch (err) {}
+  $('keyin').value = ''; $('keyform').hidden = true; tries = 0; pump();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hidAt = Date.now(); stopRec('hidden'); return; }
+  // An upload that sat through a long background is most likely dead on iOS: abort and retry it.
+  if (ctl && Date.now() - Math.max(upAt, hidAt) > 30000) ctl.abort();
+  if (state === 'rec') wake();
+  tries = 0; pump();
+});
+addEventListener('pagehide', () => stopRec('hidden'));
+addEventListener('online', () => { tries = 0; pump(); });
+addEventListener('hashchange', () => { loadKey(); if (key) pump(); });
+// After an auto-start without a tap the AudioContext may be suspended: the first touch wakes the meter.
+document.addEventListener('pointerdown', () => { if (ac && ac.state === 'suspended') ac.resume().catch(() => {}); });
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+
+loadKey();
+show();
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+// Opening the home-screen app with a key starts recording at once (icon tap = recording).
+// Not in a normal browser tab (the setup link) and never on visibilitychange.
+const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+openDB().then(d => { db = d; show(); if (key && standalone) startRec(true); pump(); })
+  .catch(e => setStatus('Kan ikke gemme optagelser på denne enhed: ' + errText(e), 'bad'));
+</script>
+</body>
+</html>
